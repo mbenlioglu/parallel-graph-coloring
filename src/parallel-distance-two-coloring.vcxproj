@@ -111,6 +111,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="graph.h" />
+    <ClInclude Include="graphio.h" />
+    <ClInclude Include="mmio.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="coloring.cpp" />
+    <ClCompile Include="graphio.c" />
+    <ClCompile Include="mmio.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

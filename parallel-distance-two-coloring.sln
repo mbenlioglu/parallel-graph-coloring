@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.27004.2008
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "parallel-distance-two-coloring", "parallel-distance-two-coloring\parallel-distance-two-coloring.vcxproj", "{45CA47E2-FEFB-4685-B917-7ABB950DFC6C}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "parallel-distance-two-coloring", "src\parallel-distance-two-coloring.vcxproj", "{45CA47E2-FEFB-4685-B917-7ABB950DFC6C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

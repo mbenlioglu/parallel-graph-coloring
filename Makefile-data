@@ -1,0 +1,24 @@
+extract: af_shell3.tar.gz bone010.tar.gz coPapersDBLP.tar.gz nlpkkt120.tar.gz nlpkkt240.tar.gz
+	tar -xzvf ./data/af_shell3.tar.gz -C ./data/
+	tar -xzvf ./data/bone010.tar.gz -C ./data/
+	tar -xzvf ./data/coPapersDBLP.tar.gz -C ./data/
+	tar -xzvf ./data/nlpkkt120.tar.gz -C ./data/
+	tar -xzvf ./data/nlpkkt240.tar.gz -C ./data/
+
+af_shell3.tar.gz:
+	mkdir -p data 
+	wget -P ./data/ https://sparse.tamu.edu/MM/Schenk_AFE/af_shell3.tar.gz
+bone010.tar.gz:
+	mkdir -p data
+	wget -P ./data/ https://sparse.tamu.edu/MM/Oberwolfach/bone010.tar.gz
+coPapersDBLP.tar.gz:
+	mkdir -p data
+	wget -P ./data/ https://sparse.tamu.edu/MM/DIMACS10/coPapersDBLP.tar.gz
+nlpkkt120.tar.gz:
+	mkdir -p data 
+	wget -P ./data/ https://sparse.tamu.edu/MM/Schenk/nlpkkt120.tar.gz
+nlpkkt240.tar.gz:
+	mkdir -p data 
+	wget -P ./data/ https://sparse.tamu.edu/MM/Schenk/nlpkkt240.tar.gz
+clean:
+	rm ./data/af_shell3.tar.gz ./data/bone010.tar.gz ./data/coPapersDBLP.tar.gz ./data/nlpkkt120.tar.gz ./data/nlpkkt240.tar.gz
