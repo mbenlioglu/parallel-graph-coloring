@@ -26,7 +26,7 @@ extern "C" {
 #include <omp.h>
 
 
-//#define DEBUG
+#define DEBUG
 
 //===========================================================================================================================
 // Common Structs/Enums
@@ -117,158 +117,204 @@ int findMaxEdgeCnt(etype *row, vtype *col, vtype nov)
 	return max;
 }
 
+/*
+	Update *row, *col pointers to make distance-2 nighbors, distance-1 neighbors
+*/
+void distance2ToDistance1(etype *row, vtype *col, vtype nov)
+{
+	
+}
+
 void print_usage()
 {
-	std::cout << "./coloring <filename> <optimization flag {-O1, -O2)}> \n";
+	std::cout << "./coloring <filename>\n";
 	std::cout << "Press Enter to continue...";
 	std::cin.get();
 }
 
 //===========================================================================================================================
-// Namespaces for Direct/Heuristic coloring functions
+// Namespaces for implementations
 //===========================================================================================================================
-namespace Direct
+
+// Distance-1 graph coloring
+namespace Distance1
 {
-	/*
-		Traverses the neighbours of the given vertex and returns the smallest available color for the vertex
-		
-		*row and *col: pointers define the starting point of the graph
-		vertex:		   the index of the vertex that wanted to be colored
-		nov:		   number of vertices in the graph
-		colors:		   the array storing color values assigned to each vertex (-1 means unassigned)
-		isColorUsed:   the array that will be used as temporal storage to find which is the smallest unused color value
-			(taken as parameter because of efficiency considerations)
-		maxEdgeCnt:    maximum number of edges a vertex can have (i.e. size of isColorUsed - 1)
-	*/
-	int getSmallestAvailableColor(int vertex, etype *row, vtype *col, vtype nov, short colors[], bool isColorUsed[], int maxEdgeCnt)
+	namespace Direct
 	{
-		int colStart, colEnd;
-		colStart = row[vertex];
-		colEnd = row[vertex + 1];
+		/*
+			Traverses the neighbours of the given vertex and returns the smallest available color for the vertex
 
-		// track whether a color is used it not
-		for (int i = colStart; i < colEnd; i++)
+			*row and *col: pointers define the starting point of the graph
+			vertex:		   the index of the vertex that wanted to be colored
+			nov:		   number of vertices in the graph
+			colors:		   the array storing color values assigned to each vertex (-1 means unassigned)
+			isColorUsed:   the array that will be used as temporal storage to find which is the smallest unused color value
+				(taken as parameter because of efficiency considerations)
+			maxEdgeCnt:    maximum number of edges a vertex can have (i.e. size of isColorUsed - 1)
+		*/
+		int getSmallestAvailableColor(int vertex, etype *row, vtype *col, vtype nov, short colors[], bool isColorUsed[], int maxEdgeCnt)
 		{
-			int c = colors[col[i]];
-			if (c >= 0)
-				isColorUsed[c] = true;
-		}
+			int colStart, colEnd;
+			colStart = row[vertex];
+			colEnd = row[vertex + 1];
 
-		//	return the smallest unused color
-		for (int i = 0; i < maxEdgeCnt + 1; i++)
-		{
-			if (!isColorUsed[i])
+			//reset setted parts in bool array
+			for (int j = colStart; j < colEnd; j++)
 			{
-				//reset setted parts in bool array
-				for (int j = colStart; j < colEnd; j++)
-				{
-					int c = colors[col[j]];
-					if (c >= 0)
-						isColorUsed[c] = false;
-				}
-
-				return i;
+				int c = colors[col[j]];
+				if (c >= 0)
+					isColorUsed[c] = false;
 			}
+
+			// track whether a color is used it not
+			for (int i = colStart; i < colEnd; i++)
+			{
+				int c = colors[col[i]];
+				if (c >= 0)
+					isColorUsed[c] = true;
+			}
+
+			//	return the smallest unused color
+			for (int i = 0; i < maxEdgeCnt + 1; i++)
+				if (!isColorUsed[i])
+					return i;
+
+			// should never enter here
+			return -1;
 		}
-		
-		// should never enter here
-		return -1;
-	}
 
-	perfData color_graph_seq(etype *row, vtype *col, vtype nov, short colors[], int maxEdgeCnt)
-	{
-		perfData result;
-		double startTime, endTime;
-		int maxColor = 0;
-		bool *isColorUsed = new bool[maxEdgeCnt + 1]();
-
-		startTime = omp_get_wtime();
-		for (int i = 0; i < nov; i++)
+		perfData color_graph_seq(etype *row, vtype *col, vtype nov, short colors[], int maxEdgeCnt)
 		{
-			int c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed, maxEdgeCnt);
-			colors[i] = c;
-			if (c > maxColor) maxColor = c;
+			perfData result;
+			double startTime, endTime;
+			int maxColor = 0;
+			bool *isColorUsed = new bool[maxEdgeCnt + 1]();
+
+			startTime = omp_get_wtime();
+			for (int i = 0; i < nov; i++)
+			{
+				int c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed, maxEdgeCnt);
+				colors[i] = c;
+				if (c > maxColor) maxColor = c;
+			}
+			endTime = omp_get_wtime();
+
+			// clean up
+			delete[] isColorUsed;
+
+			result.colorCnt = maxColor + 1;
+			result.execTime = endTime - startTime;
+			result.prepTime = result.mergeConflictCnt = 0;
+			return result;
 		}
-		endTime = omp_get_wtime();
 
-		// clean up
-		delete[] isColorUsed;
+		perfData color_graph_par(etype *row, vtype *col, vtype nov, short colors[], int maxEdgeCnt)
+		{
+			perfData result;
+			double startTime, endTime;
 
-		result.colorCnt = maxColor + 1;
-		result.execTime = endTime - startTime;
-		result.prepTime = result.mergeConflictCnt = 0;
-		return result;
-	}
+			int mergeConflictCnt = -1;
 
-	perfData color_graph_par(etype *row, vtype *col, vtype nov, short colors[], int maxEdgeCnt)
-	{
-		perfData result;
-		double startTime, endTime;
-
-		int mergeConflictCnt = -1;
-
-		int confArrSize = nov / 2 + 1;
-		int *conflictedVertices = new int[confArrSize]();
-		bool *isVertexDetected = new bool[nov]();
-		static bool *isColorUsed;
+			int confArrSize = nov / 2 + 1;
+			int *conflictedVertices = new int[confArrSize]();
+			bool *isVertexDetected = new bool[nov]();
+			static bool *isColorUsed;
 #pragma omp threadprivate(isColorUsed)
 
 #pragma omp parallel
-		{
-			isColorUsed = new bool[maxEdgeCnt + 1]();
-		}
-
-		// first stage coloring
-		startTime = omp_get_wtime();
-#pragma omp parallel for
-		for (int i = 0; i < nov; i++)
-		{
-			int c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed, maxEdgeCnt);
-			colors[i] = c;
-		}
-
-		int confCnt = 0;
-		// fix conflict
-		do
-		{
-			// detect conflicted vertices
-			confCnt = detect_conflicts(row, col, nov, colors, isVertexDetected, conflictedVertices);
-#pragma omp for
-			for (int i = 0; i < confCnt; i++) // recolor
 			{
-				int c = getSmallestAvailableColor(conflictedVertices[i], row, col, nov, colors, isColorUsed, maxEdgeCnt);
-				colors[conflictedVertices[i]] = c;
+				isColorUsed = new bool[maxEdgeCnt + 1]();
 			}
-			++mergeConflictCnt;
-		} while (confCnt > 0);
-		endTime = omp_get_wtime();
 
-		// clean up
-		delete[] isVertexDetected;
-		delete[] conflictedVertices;
+			// first stage coloring
+			startTime = omp_get_wtime();
+#pragma omp parallel for
+			for (int i = 0; i < nov; i++)
+			{
+				int c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed, maxEdgeCnt);
+				colors[i] = c;
+			}
+
+			int confCnt = 0;
+			// fix conflict
+			do
+			{
+				// detect conflicted vertices
+				confCnt = detect_conflicts(row, col, nov, colors, isVertexDetected, conflictedVertices);
+#pragma omp for
+				for (int i = 0; i < confCnt; i++) // recolor
+				{
+					int c = getSmallestAvailableColor(conflictedVertices[i], row, col, nov, colors, isColorUsed, maxEdgeCnt);
+					colors[conflictedVertices[i]] = c;
+				}
+				++mergeConflictCnt;
+			} while (confCnt > 0);
+			endTime = omp_get_wtime();
+
+			// clean up
+			delete[] isVertexDetected;
+			delete[] conflictedVertices;
 #pragma omp parallel
+			{
+				delete[] isColorUsed;
+			}
+
+			result.colorCnt = num_of_colors(nov, colors);
+			result.execTime = endTime - startTime;
+			result.mergeConflictCnt = mergeConflictCnt;
+			result.prepTime = 0;
+			return result;
+		}
+	}
+
+	namespace Heuristic
+	{
+		perfData color_graph_seq(etype *row, vtype *col, vtype nov, int colors[])
 		{
-			delete[] isColorUsed;
+			throw std::runtime_error("Not Implemented");
 		}
 
-		result.colorCnt = num_of_colors(nov, colors);
-		result.execTime = endTime - startTime;
-		result.mergeConflictCnt = mergeConflictCnt;
-		result.prepTime = 0;
-		return result;
+		perfData color_graph_par(etype *row, vtype *col, vtype nov, int colors[])
+		{
+			throw std::runtime_error("Not Implemented");
+		}
 	}
 }
 
-namespace Heuristic
+// Distance-2 Graph coloring
+namespace Distance2
 {
-	perfData color_graph_seq(etype *row, vtype *col, vtype nov, int colors[])
+	namespace Direct
 	{
-		throw std::runtime_error("Not Implemented");
-	}
+		perfData color_graph_seq(etype *row, vtype *col, vtype nov, short colors[], int maxD2NeighborCnt)
+		{
+			//perfData result;
+			//double startTime, endTime;
+			//int maxColor = 0;
+			//bool *isColorUsed = new bool[maxD2NeighborCnt + 1]();
 
-	perfData color_graph_par(etype *row, vtype *col, vtype nov, int colors[])
-	{
-		throw std::runtime_error("Not Implemented");
+			//startTime = omp_get_wtime();
+			//for (int i = 0; i < nov; i++)
+			//{
+			//	int c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed, maxD2NeighborCnt);
+			//	colors[i] = c;
+			//	if (c > maxColor) maxColor = c;
+			//}
+			//endTime = omp_get_wtime();
+
+			//// clean up
+			//delete[] isColorUsed;
+
+			//result.colorCnt = maxColor + 1;
+			//result.execTime = endTime - startTime;
+			//result.prepTime = result.mergeConflictCnt = 0;
+			//return result;
+		}
+
+		perfData color_graph_par(etype *row, vtype *col, vtype nov, short colors[], int maxD2NeighborCnt)
+		{
+			// TODO:
+		}
 	}
 }
 //===========================================================================================================================
@@ -313,7 +359,7 @@ int main(int argc, char *argv[])
 	
 	// Sequential
 	std::cout << "Starting sequential algorithm...";
-	perfSeq = Direct::color_graph_seq(row_ptr, col_ind, nov, colors, maxEdgeCnt);
+	perfSeq = Distance1::Direct::color_graph_seq(row_ptr, col_ind, nov, colors, maxEdgeCnt);
 	std::cout << "ended\n";
 #ifdef DEBUG
 	int outSize = nov / 2 + 1;
@@ -334,7 +380,7 @@ int main(int argc, char *argv[])
 	{
 		omp_set_num_threads((2 << i) / 2);
 		std::cout << "Starting parallel algorithm with " << (2 << i) / 2 << " threads...";
-		perfPar[i] = Direct::color_graph_par(row_ptr, col_ind, nov, colors, maxEdgeCnt);
+		perfPar[i] = Distance1::Direct::color_graph_par(row_ptr, col_ind, nov, colors, maxEdgeCnt);
 		std::cout << "ended\n";
 #ifdef DEBUG
 		std::cout << "Running correctness check...";
@@ -356,9 +402,13 @@ int main(int argc, char *argv[])
 	std::cout << "\n";
 
 	//===========================================================================================================================
-	// Heuristic Approach
+	// D2-D1 conversion then D1 solution
 	//===========================================================================================================================
-	// Not yet implemented... See docs for more information
+	
+
+
+
+
 
 	std::cout << "Press Enter to continue...\n";
 	std::cin.get();
