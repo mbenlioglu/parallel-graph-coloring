@@ -49,7 +49,7 @@ class ProgressBar:
             bar = self.__fill * filled_length + '-' * (self.__bar_length - filled_length)
 
             sys.stdout.write('\r%s |%s| %s%% %s' % (self.__prefix, bar, percents, self.__suffix))
-        else:
+        if self.__completed >= self.__total:
             sys.stdout.write('\n')
         sys.stdout.flush()
 
