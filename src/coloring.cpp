@@ -44,47 +44,6 @@ typedef	struct perfData
 // Common Functions
 //===========================================================================================================================
 
-/*
-	Traverses entire graph to find conflicts (i.e. adjecent vertices with same color), returns the number of such
-	conflicts as return value, indices of these vertices are written into out array.
-
-	*row and *col: pointers define the starting point of the graph
-	nov:		   number of vertices in the graph
-	colors:		   the array storing color values assigned to each vertex (-1 means unassigned)
-	isDetected:    the array that will be used as temporal storage to find whether the vertex is already marked as 
-		conflict, initially all values assumed to be false (taken as parameter because of efficiency considerations)
-	out:		   output array that contains all the vertices marked to be re-colored (size >= nov/2)
-
-	returns:       number of conflicts detected.
-*/
-int detect_conflicts(etype *row, vtype *col, vtype nov, int colors[], bool isDetected[], int out[])
-{
-	unsigned int index = 0;
-
-	for (int i = 0; i < nov; i++)
-	{
-		int c = colors[i];
-		int colStart = row[i], colEnd = row[i + 1];
-		for (int j = colStart; j < colEnd; j++)
-		{
-			if (colors[col[j]] == c) 
-			{
-				int conflictIndex = i < col[j] ? i : col[j];
-				if (!isDetected[conflictIndex])
-				{
-					isDetected[conflictIndex] = true;
-					out[index++] = conflictIndex;
-				}
-			}
-		}
-	}
-
-	// reset isDetected array
-	for (int i = 0; i < index; i++)
-		isDetected[out[index]] = false;
-
-	return index;
-}
 
 /*
 	Finds and returns total number of colors used in the coloring
@@ -139,6 +98,48 @@ void print_usage()
 // Distance-1 graph coloring
 namespace Distance1
 {
+	/*
+	Traverses entire graph to find conflicts (i.e. adjecent vertices with same color), returns the number of such
+	conflicts as return value, indices of these vertices are written into out array.
+
+	*row and *col: pointers define the starting point of the graph
+	nov:		   number of vertices in the graph
+	colors:		   the array storing color values assigned to each vertex (-1 means unassigned)
+	isDetected:    the array that will be used as temporal storage to find whether the vertex is already marked as
+	conflict, initially all values assumed to be false (taken as parameter because of efficiency considerations)
+	out:		   output array that contains all the vertices marked to be re-colored (size >= nov/2)
+
+	returns:       number of conflicts detected.
+	*/
+	int detect_conflicts(etype *row, vtype *col, vtype nov, int colors[], bool isDetected[], int out[])
+	{
+		unsigned int index = 0;
+
+		for (int i = 0; i < nov; i++)
+		{
+			int c = colors[i];
+			int colStart = row[i], colEnd = row[i + 1];
+			for (int j = colStart; j < colEnd; j++)
+			{
+				if (colors[col[j]] == c)
+				{
+					int conflictIndex = i < col[j] ? i : col[j];
+					if (!isDetected[conflictIndex])
+					{
+						isDetected[conflictIndex] = true;
+						out[index++] = conflictIndex;
+					}
+				}
+			}
+		}
+
+		// reset isDetected array
+		for (int i = 0; i < index; i++)
+			isDetected[out[i]] = false;
+
+		return index;
+	}
+
 	namespace Direct
 	{
 		/*
@@ -284,6 +285,49 @@ namespace Distance1
 // Distance-2 Graph coloring
 namespace Distance2
 {
+	int detect_conflicts(etype *row, vtype *col, vtype nov, int colors[], bool isDetected[], int out[])
+	{
+		unsigned int index = 0;
+
+		for (int i = 0; i < nov; i++)
+		{
+			int c = colors[i];
+			int colStart = row[i], colEnd = row[i + 1];
+			for (int j = colStart; j < colEnd; j++)
+			{
+				if (colors[col[j]] == c)
+				{
+					int conflictIndex = i < col[j] ? i : col[j];
+					if (!isDetected[conflictIndex])
+					{
+						isDetected[conflictIndex] = true;
+						out[index++] = conflictIndex;
+					}
+				}
+
+				int d2colStart = row[j], d2colEnd = row[j + 1];
+				for (int k = d2colStart; k < d2colEnd; ++k)
+				{
+					if (colors[col[k]] == c && col[k] != i)
+					{
+						int conflictIndex = i < col[k] ? i : col[k];
+						if (!isDetected[conflictIndex])
+						{
+							isDetected[conflictIndex] = true;
+							out[index++] = conflictIndex;
+						}
+					}
+				}
+			}
+		}
+
+		// reset isDetected array
+		for (int i = 0; i < index; i++)
+			isDetected[out[i]] = false;
+
+		return index;
+	}
+
 	namespace Direct
 	{
 		int getSmallestAvailableColor(int vertex, etype *row, vtype *col, vtype nov, int colors[], bool isColorUsed[])
@@ -406,17 +450,17 @@ int main(int argc, char *argv[])
 	
 	// Sequential
 	std::cout << "Starting sequential algorithm...";
-	perfSeq = Distance2::Direct::color_graph_seq(row_ptr, col_ind, nov, colors, maxEdgeCnt);
+	perfSeq = Distance2::Direct::color_graph_seq(row_ptr, col_ind, nov, colors);
 	std::cout << "ended\n";
 #ifdef DEBUG
-	int outSize = nov / 2 + 1;
+	int outSize = nov;
 
 	// these two are used in the detect_conflicts, for correctness we only need to check conflict count.
 	bool *isDetected = new bool[outSize]();
 	int *out = new int[outSize]();
 
 	std::cout << "Running correctness check...";
-	std::string s = !detect_conflicts(row_ptr, col_ind, nov, colors, isDetected, out) ? "correct\n" : "wrong!\n";
+	std::string s = !Distance2::detect_conflicts(row_ptr, col_ind, nov, colors, isDetected, out) ? "correct\n" : "wrong!\n";
 	std::cout << s;
 	std::fill_n(isDetected, outSize, false);
 #endif // DEBUG
@@ -427,11 +471,11 @@ int main(int argc, char *argv[])
 	{
 		omp_set_num_threads((2 << i) / 2);
 		std::cout << "Starting parallel algorithm with " << (2 << i) / 2 << " threads...";
-		perfPar[i] = Distance2::Direct::color_graph_par(row_ptr, col_ind, nov, colors, maxEdgeCnt);
+		perfPar[i] = Distance2::Direct::color_graph_par(row_ptr, col_ind, nov, colors);
 		std::cout << "ended\n";
 #ifdef DEBUG
 		std::cout << "Running correctness check...";
-		s = !detect_conflicts(row_ptr, col_ind, nov, colors, isDetected, out) ? "correct\n" : "wrong!\n";
+		s = !Distance2::detect_conflicts(row_ptr, col_ind, nov, colors, isDetected, out) ? "correct\n" : "wrong!\n";
 		std::cout << s;
 		std::fill_n(isDetected, outSize, false);
 #endif // DEBUG
