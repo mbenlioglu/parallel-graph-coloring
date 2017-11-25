@@ -305,7 +305,7 @@ namespace Distance2
 					}
 				}
 
-				int d2colStart = row[j], d2colEnd = row[j + 1];
+				int d2colStart = row[col[j]], d2colEnd = row[col[j] + 1];
 				for (int k = d2colStart; k < d2colEnd; ++k)
 				{
 					if (colors[col[k]] == c && col[k] != i)
@@ -343,7 +343,7 @@ namespace Distance2
 				if (c >= 0)
 					isColorUsed[c] = false;
 
-				int d2colStart = row[i], d2colEnd = row[i + 1];
+				int d2colStart = row[col[i]], d2colEnd = row[col[i] + 1];
 				for (int j = d2colStart; j < d2colEnd; j++)
 				{
 					c = colors[col[j]];
@@ -359,7 +359,7 @@ namespace Distance2
 				if (c >= 0)
 					isColorUsed[c] = true;
 
-				int d2colStart = row[i], d2colEnd = row[i + 1];
+				int d2colStart = row[col[i]], d2colEnd = row[col[i] + 1];
 				for (int j = d2colStart; j < d2colEnd; j++)
 				{
 					c = colors[col[j]];
@@ -405,6 +405,7 @@ namespace Distance2
 		perfData color_graph_par(etype *row, vtype *col, vtype nov, int colors[])
 		{
 			// TODO:
+			return perfData();
 		}
 	}
 }
