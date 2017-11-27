@@ -404,8 +404,60 @@ namespace Distance2
 
 		perfData color_graph_par(etype *row, vtype *col, vtype nov, int colors[])
 		{
-			// TODO:
-			return perfData();
+			perfData result;
+			double startTime, endTime;
+
+			int mergeConflictCnt = -1;
+
+			int confArrSize = nov / 2 + 1;
+			int *conflictedVertices = new int[confArrSize]();
+			bool *isVertexDetected = new bool[nov]();
+			static bool *isColorUsed;
+#pragma omp threadprivate(isColorUsed)
+
+#pragma omp parallel
+			{
+				isColorUsed = new bool[nov + 1]();
+			}
+
+			// first stage coloring
+			startTime = omp_get_wtime();
+#pragma omp parallel for
+			for (int i = 0; i < nov; i++)
+			{
+				int c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed);
+				colors[i] = c;
+			}
+
+			int confCnt = 0;
+			// fix conflict
+			do
+			{
+				// detect conflicted vertices
+				confCnt = detect_conflicts(row, col, nov, colors, isVertexDetected, conflictedVertices);
+#pragma omp for
+				for (int i = 0; i < confCnt; i++) // recolor
+				{
+					int c = getSmallestAvailableColor(conflictedVertices[i], row, col, nov, colors, isColorUsed);
+					colors[conflictedVertices[i]] = c;
+				}
+				++mergeConflictCnt;
+			} while (confCnt > 0);
+			endTime = omp_get_wtime();
+
+			// clean up
+			delete[] isVertexDetected;
+			delete[] conflictedVertices;
+#pragma omp parallel
+			{
+				delete[] isColorUsed;
+			}
+
+			result.colorCnt = num_of_colors(nov, colors);
+			result.execTime = endTime - startTime;
+			result.mergeConflictCnt = mergeConflictCnt;
+			result.prepTime = 0;
+			return result;
 		}
 	}
 }
