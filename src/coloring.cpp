@@ -23,6 +23,7 @@ extern "C" {
 #include <string>
 #include <iomanip>
 #include <algorithm>
+#include<unordered_set>
 #include <omp.h>
 
 
@@ -79,9 +80,79 @@ int findMaxEdgeCnt(etype *row, vtype *col, vtype nov)
 /*
 	Update *row, *col pointers to make distance-2 nighbors, distance-1 neighbors
 */
-void distance2ToDistance1(etype *row, vtype *col, vtype nov)
+void distance2ToDistance1(etype *rowD1, vtype *colD1, vtype nov, etype *rowD2, vtype *colD2)
 {
-	
+	std::unordered_set<int> * adjancency_map = new std::unordered_set<int>[nov];
+
+
+	int i;
+#pragma omp parallel for
+	for (i = 0; i < nov; i++)
+	{
+		for (int w = rowD1[i]; w < rowD1[i + 1]; w++)
+		{
+			int current_adj = colD1[w];
+
+			//add distance-1 adj
+			if (adjancency_map[i].find(current_adj) == adjancency_map[i].end())
+			{
+				adjancency_map[i].insert(current_adj);
+			}
+
+			for (int w2 = rowD1[current_adj]; w2 < rowD1[current_adj + 1]; w2++)
+			{
+				//add distance-2 adj
+				int current_d2_adj = colD1[w2];
+
+				if (adjancency_map[i].find(current_d2_adj) == adjancency_map[i].end())
+				{
+					adjancency_map[i].insert(current_d2_adj);
+				}
+
+			}
+
+		}
+
+		//delete self
+
+		adjancency_map[i].erase(i);
+
+	}
+
+	int sum = 0;
+	int j;
+
+	rowD2 = new unsigned int[nov + 1];
+
+	for (j = 0; j < nov; j++)
+	{
+		rowD2[j] = sum;
+		sum += adjancency_map[j].size();
+	}
+	rowD2[nov] = sum;
+
+
+	colD2 = new int[sum];
+
+
+	std::unordered_set<int>::const_iterator it;
+
+#pragma omp parallel for private(it)
+	for (i = 0; i < nov; i++)
+	{
+		it = adjancency_map[i].begin();
+
+		for (int j = rowD2[i]; j < rowD2[i + 1]; j++)
+		{
+			colD2[j] = *it;
+
+			it++;
+		}
+
+	}
+
+	delete[] adjancency_map;
+
 }
 
 void print_usage()
@@ -114,26 +185,32 @@ namespace Distance1
 	int detect_conflicts(etype *row, vtype *col, vtype nov, int colors[], bool isDetected[], int out[])
 	{
 		unsigned int index = 0;
-
-		for (int i = 0; i < nov; i++)
+		int c, colStart, colEnd, conflictIndex, temp;
+		int i, j, k;
+#pragma omp parallel for private(j, k, c, colStart, colEnd, conflictIndex, temp)
+		for (i = 0; i < nov; i++)
 		{
-			int c = colors[i];
-			int colStart = row[i], colEnd = row[i + 1];
-			for (int j = colStart; j < colEnd; j++)
+			c = colors[i];
+			colStart = row[i];
+			colEnd = row[i + 1];
+			for (j = colStart; j < colEnd; j++)
 			{
 				if (colors[col[j]] == c)
 				{
-					int conflictIndex = i < col[j] ? i : col[j];
+					conflictIndex = i < col[j] ? i : col[j];
 					if (!isDetected[conflictIndex])
 					{
 						isDetected[conflictIndex] = true;
-						out[index++] = conflictIndex;
+#pragma omp atomic capture
+						temp = index++;
+						out[temp] = conflictIndex;
 					}
 				}
 			}
 		}
 
 		// reset isDetected array
+#pragma omp parallel for 
 		for (int i = 0; i < index; i++)
 			isDetected[out[i]] = false;
 
@@ -142,6 +219,20 @@ namespace Distance1
 
 	namespace Direct
 	{
+		void resetIsColorUsed(int vertex, etype *row, vtype *col, int colors[], bool isColorUsed[])
+		{
+			int colStart, colEnd;
+			colStart = row[vertex];
+			colEnd = row[vertex + 1];
+
+			//reset setted parts in bool array
+			for (int j = colStart; j < colEnd; j++)
+			{
+				int c = colors[col[j]];
+				if (c >= 0)
+					isColorUsed[c] = false;
+			}
+		}
 		/*
 			Traverses the neighbours of the given vertex and returns the smallest available color for the vertex
 
@@ -159,14 +250,6 @@ namespace Distance1
 			colStart = row[vertex];
 			colEnd = row[vertex + 1];
 
-			//reset setted parts in bool array
-			for (int j = colStart; j < colEnd; j++)
-			{
-				int c = colors[col[j]];
-				if (c >= 0)
-					isColorUsed[c] = false;
-			}
-
 			// track whether a color is used it not
 			for (int i = colStart; i < colEnd; i++)
 			{
@@ -178,7 +261,10 @@ namespace Distance1
 			//	return the smallest unused color
 			for (int i = 0; i < maxEdgeCnt + 1; i++)
 				if (!isColorUsed[i])
+				{
+					resetIsColorUsed(vertex, row, col, colors, isColorUsed);
 					return i;
+				}
 
 			// should never enter here
 			throw std::runtime_error("Should NEVER enter HERE!!");
@@ -228,9 +314,10 @@ namespace Distance1
 			}
 
 			// first stage coloring
+			int i, c;
 			startTime = omp_get_wtime();
-#pragma omp parallel for
-			for (int i = 0; i < nov; i++)
+#pragma omp parallel for private(c)
+			for (i = 0; i < nov; i++)
 			{
 				int c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed, maxEdgeCnt);
 				colors[i] = c;
@@ -242,10 +329,10 @@ namespace Distance1
 			{
 				// detect conflicted vertices
 				confCnt = detect_conflicts(row, col, nov, colors, isVertexDetected, conflictedVertices);
-#pragma omp for
-				for (int i = 0; i < confCnt; i++) // recolor
+#pragma omp for private(c)
+				for (i = 0; i < confCnt; i++) // recolor
 				{
-					int c = getSmallestAvailableColor(conflictedVertices[i], row, col, nov, colors, isColorUsed, maxEdgeCnt);
+					c = getSmallestAvailableColor(conflictedVertices[i], row, col, nov, colors, isColorUsed, maxEdgeCnt);
 					colors[conflictedVertices[i]] = c;
 				}
 				++mergeConflictCnt;
@@ -288,33 +375,41 @@ namespace Distance2
 	int detect_conflicts(etype *row, vtype *col, vtype nov, int colors[], bool isDetected[], int out[])
 	{
 		unsigned int index = 0;
-
-		for (int i = 0; i < nov; i++)
+		int c, colStart, colEnd, d2colStart, d2colEnd, conflictIndex, temp;
+		int i, j, k;
+#pragma omp parallel for private(j, k, c, colStart, colEnd, d2colStart, d2colEnd, conflictIndex, temp)
+		for (i = 0; i < nov; i++)
 		{
-			int c = colors[i];
-			int colStart = row[i], colEnd = row[i + 1];
-			for (int j = colStart; j < colEnd; j++)
+			c = colors[i];
+			colStart = row[i];
+			colEnd = row[i + 1];
+			for (j = colStart; j < colEnd; j++)
 			{
 				if (colors[col[j]] == c)
 				{
-					int conflictIndex = i < col[j] ? i : col[j];
+					conflictIndex = i < col[j] ? i : col[j];
 					if (!isDetected[conflictIndex])
 					{
 						isDetected[conflictIndex] = true;
-						out[index++] = conflictIndex;
+#pragma omp atomic capture
+						temp = index++;
+						out[temp] = conflictIndex;
 					}
 				}
 
-				int d2colStart = row[col[j]], d2colEnd = row[col[j] + 1];
-				for (int k = d2colStart; k < d2colEnd; ++k)
+				d2colStart = row[col[j]];
+				d2colEnd = row[col[j] + 1];
+				for (k = d2colStart; k < d2colEnd; ++k)
 				{
 					if (colors[col[k]] == c && col[k] != i)
 					{
-						int conflictIndex = i < col[k] ? i : col[k];
+						conflictIndex = i < col[k] ? i : col[k];
 						if (!isDetected[conflictIndex])
 						{
 							isDetected[conflictIndex] = true;
-							out[index++] = conflictIndex;
+#pragma omp atomic capture
+							temp = index++;
+							out[temp] = conflictIndex;
 						}
 					}
 				}
@@ -322,7 +417,8 @@ namespace Distance2
 		}
 
 		// reset isDetected array
-		for (int i = 0; i < index; i++)
+#pragma omp parallel for 
+		for (i = 0; i < index; i++)
 			isDetected[out[i]] = false;
 
 		return index;
@@ -330,7 +426,7 @@ namespace Distance2
 
 	namespace Direct
 	{
-		int getSmallestAvailableColor(int vertex, etype *row, vtype *col, vtype nov, int colors[], bool isColorUsed[])
+		void resetIsColorUsed(int vertex, etype *row, vtype *col, int colors[], bool isColorUsed[])
 		{
 			int colStart, colEnd;
 			colStart = row[vertex];
@@ -351,6 +447,13 @@ namespace Distance2
 						isColorUsed[c] = false;
 				}
 			}
+		}
+
+		int getSmallestAvailableColor(int vertex, etype *row, vtype *col, vtype nov, int colors[], bool isColorUsed[])
+		{
+			int colStart, colEnd;
+			colStart = row[vertex];
+			colEnd = row[vertex + 1];
 
 			// track whether a color is used it not
 			for (int i = colStart; i < colEnd; i++)
@@ -371,7 +474,10 @@ namespace Distance2
 			//	return the smallest unused color
 			for (int i = 0; i < nov + 1; i++)
 				if (!isColorUsed[i])
+				{
+					resetIsColorUsed(vertex, row, col, colors, isColorUsed);
 					return i;
+				}
 
 			// should never enter here
 			throw std::runtime_error("Should NEVER enter HERE!!");
@@ -421,11 +527,12 @@ namespace Distance2
 			}
 
 			// first stage coloring
+			int i, c;
 			startTime = omp_get_wtime();
-#pragma omp parallel for
-			for (int i = 0; i < nov; i++)
+#pragma omp parallel for private(c)
+			for (i = 0; i < nov; i++)
 			{
-				int c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed);
+				c = getSmallestAvailableColor(i, row, col, nov, colors, isColorUsed);
 				colors[i] = c;
 			}
 
@@ -435,10 +542,10 @@ namespace Distance2
 			{
 				// detect conflicted vertices
 				confCnt = detect_conflicts(row, col, nov, colors, isVertexDetected, conflictedVertices);
-#pragma omp for
-				for (int i = 0; i < confCnt; i++) // recolor
+#pragma omp for private(c)
+				for (i = 0; i < confCnt; i++) // recolor
 				{
-					int c = getSmallestAvailableColor(conflictedVertices[i], row, col, nov, colors, isColorUsed);
+					c = getSmallestAvailableColor(conflictedVertices[i], row, col, nov, colors, isColorUsed);
 					colors[conflictedVertices[i]] = c;
 				}
 				++mergeConflictCnt;
@@ -466,24 +573,41 @@ namespace Distance2
 
 int main(int argc, char *argv[])
 {
+	std::string baseName = std::string(argv[0]);
+	std::string fillerAsterisk(100, '*');
+	std::string fillerDashes(100, '-');
+
+	// Get executable name from path
+#ifdef _WIN32
+	baseName = baseName.substr(baseName.rfind('\\') + 1);
+#else
+	baseName = baseName.substr(baseName.rfind('/') + 1);
+#endif // _WIN32
+
+	std::cout << fillerAsterisk << std::endl;
+	std::cout << "Starting " << baseName << "...\n";
+	std::cout << fillerAsterisk << std::endl;
+
 	etype *row_ptr;
 	vtype *col_ind;
 	ewtype *ewghts;
 	vwtype *vwghts;
 	vtype nov;
 
+	std::cout << "\nReading graph... ";
 	// Graph reading
 	if (argc < 2)
 	{
 		print_usage();
-		return 1;
+		return EXIT_FAILURE;
 	}
 	
 	if (read_graph(argv[1], &row_ptr, &col_ind, &ewghts, &vwghts, &nov, 0) == -1)
 	{
 		std::cout << "error in graph read\n";
-		return 1;
+		return EXIT_FAILURE;
 	}
+	std::cout << "done\n\n";
 
 	// Analyse graph to find maximum edge count on a vertex
 	int maxEdgeCnt = findMaxEdgeCnt(row_ptr, col_ind, nov);
@@ -497,12 +621,13 @@ int main(int argc, char *argv[])
 	//===========================================================================================================================
 	// Direct Approach
 	//===========================================================================================================================
-	std::cout << std::setfill('*') << std::setw(100) << "-\n";
-	std::cout << "Starting performance analysis for direct approch\n\n";
-	std::cout << std::setfill('*') << std::setw(100) << "-\n";
+	std::cout << fillerDashes << "\n";
+	std::cout << "Starting performance analysis for direct approch\n";
+	std::cout << fillerDashes << "\n";
 	
 	// Sequential
 	std::cout << "Starting sequential algorithm...";
+	std::cout.flush();
 	perfSeq = Distance2::Direct::color_graph_seq(row_ptr, col_ind, nov, colors);
 	std::cout << "ended\n";
 #ifdef DEBUG
@@ -513,6 +638,8 @@ int main(int argc, char *argv[])
 	int *out = new int[outSize]();
 
 	std::cout << "Running correctness check...";
+	std::cout.flush();
+	omp_set_num_threads(1);
 	std::string s = !Distance2::detect_conflicts(row_ptr, col_ind, nov, colors, isDetected, out) ? "correct\n" : "wrong!\n";
 	std::cout << s;
 	std::fill_n(isDetected, outSize, false);
@@ -524,10 +651,13 @@ int main(int argc, char *argv[])
 	{
 		omp_set_num_threads((2 << i) / 2);
 		std::cout << "Starting parallel algorithm with " << (2 << i) / 2 << " threads...";
+		std::cout.flush();
 		perfPar[i] = Distance2::Direct::color_graph_par(row_ptr, col_ind, nov, colors);
 		std::cout << "ended\n";
 #ifdef DEBUG
 		std::cout << "Running correctness check...";
+		std::cout.flush();
+		omp_set_num_threads(1);
 		s = !Distance2::detect_conflicts(row_ptr, col_ind, nov, colors, isDetected, out) ? "correct\n" : "wrong!\n";
 		std::cout << s;
 		std::fill_n(isDetected, outSize, false);
@@ -536,12 +666,13 @@ int main(int argc, char *argv[])
 	}
 
 	// Print results
-	printf("| %-15s | %-12s | %-15s | %-12s | %-15s |\n", "Algorithm", "Thread Count", "# of Conf.Fixes", "# of Colors", "Exec. Time");
-	std::cout << std::setfill('-') << std::setw(85) << "-\n";
-	printf("| %-15s | %-12d | %-15d | %-12d | %-12.10f s |\n",
+	std::cout << fillerDashes << "\n";
+	printf("| %-15s | %-12s | %-15s | %-13s | %-16s |\n", "Algorithm", "Thread Count", "# of Conf.Fixes", "# of Colors", "Exec. Time");
+	std::cout << fillerDashes << "\n";
+	printf("| %-15s | %-12d | %-15d | %-13d | %-14.10f s |\n",
 		"Sequential", 1, perfSeq.mergeConflictCnt, perfSeq.colorCnt, perfSeq.execTime);
 	for (int i = 0; i < 5; i++)
-		printf("| %-15s | %-12d | %-15d | %-12d | %-12.10f s |\n",
+		printf("| %-15s | %-12d | %-15d | %-13d | %-14.10f s |\n",
 			"Parallel", (2 << i) / 2, perfPar[i].mergeConflictCnt, perfPar[i].colorCnt, perfPar[i].execTime);
 	std::cout << "\n";
 
@@ -549,8 +680,79 @@ int main(int argc, char *argv[])
 	// D2-D1 conversion then D1 solution
 	//===========================================================================================================================
 	
+	std::cout << fillerDashes << "\n";
+	std::cout << "Starting performance analysis for D2-to-D1 conversion approch\n";
+	std::cout << fillerDashes << "\n";
 
+	etype *d2_row_ptr = NULL;
+	vtype *d2_col_ind = NULL;
+	double startTime, prepTime;
+	double parPrepTime[5];
 
+	// Preprocessing: convert graph to d1 graph
+	std::cout << "Preprocessing...";
+	std::cout.flush();
+	startTime = omp_get_wtime();
+	distance2ToDistance1(row_ptr, col_ind, nov, d2_row_ptr, d2_col_ind);
+	prepTime = omp_get_wtime() - startTime;
+	std::cout << " done\n";
+
+	// Sequential
+	std::cout << "Starting sequential algorithm...";
+	std::cout.flush();
+	perfSeq = Distance1::Direct::color_graph_seq(d2_row_ptr, d2_col_ind, nov, colors, maxEdgeCnt);
+	std::cout << "ended\n";
+#ifdef DEBUG
+	// these two are used in the detect_conflicts, for correctness we only need to check conflict count.
+	isDetected = new bool[outSize]();
+	out = new int[outSize]();
+
+	std::cout << "Running correctness check...";
+	std::cout.flush();
+	s = !Distance1::detect_conflicts(d2_row_ptr, d2_col_ind, nov, colors, isDetected, out) ? "correct\n" : "wrong!\n";
+	std::cout << s;
+	std::fill_n(isDetected, outSize, false);
+#endif // DEBUG
+	std::fill_n(colors, nov, -1); // reinitialize
+	delete[] d2_row_ptr;
+	delete[] d2_col_ind;
+
+	// Parallel
+	for (int i = 0; i < 5; i++)
+	{
+		omp_set_num_threads((2 << i) / 2);
+
+		// Preprocessing: convert graph to d1 graph
+		std::cout << "Preprocessing...";
+		std::cout.flush();
+		startTime = omp_get_wtime();
+		distance2ToDistance1(row_ptr, col_ind, nov, d2_row_ptr, d2_col_ind);
+		parPrepTime[i - 1] = omp_get_wtime() - startTime;
+		std::cout << " done\n";
+
+		std::cout << "Starting parallel algorithm with " << (2 << i) / 2 << " threads...";
+		std::cout.flush();
+		perfPar[i - 1] = Distance1::Direct::color_graph_par(d2_row_ptr, d2_col_ind, nov, colors, maxEdgeCnt);
+		std::cout << "ended\n";
+#ifdef DEBUG
+		std::cout << "Running correctness check...";
+		std::cout.flush();
+		s = !Distance1::detect_conflicts(d2_row_ptr, d2_col_ind, nov, colors, isDetected, out) ? "correct\n" : "wrong!\n";
+		std::cout << s;
+		std::fill_n(isDetected, outSize, false);
+#endif // DEBUG
+		std::fill_n(colors, nov, -1); // reinitialize
+	}
+
+	// Print results
+	printf("| %-15s | %-12s | %-15s | %-12s | %-15s | %-15s |\n", "Algorithm", "Thread Count", "# of Conf.Fixes", "# of Colors", "Prep. Time", "Exec. Time");
+	std::cout << fillerDashes << "\n";
+	printf("| %-15s | %-12d | %-15d | %-12d | %-12.10f s | %-12.10f s |\n",
+		"Sequential", 1, perfSeq.mergeConflictCnt, perfSeq.colorCnt, prepTime, perfSeq.execTime);
+	for (int i = 1; i < 5; i++)
+		printf("| %-15s | %-12d | %-15d | %-12d | %-12.10f s | %-12.10f s |\n",
+			"Parallel", (2 << i) / 2, perfPar[i].mergeConflictCnt, perfPar[i].colorCnt, parPrepTime[i], perfPar[i].execTime);
+	std::cout << "\n";
 
 
 
